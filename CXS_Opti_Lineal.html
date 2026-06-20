@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optimitzador de Tall Lineal</title>
+    <style>
+        :root {
+            --primary: #0284c7;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 15px;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            font-size: 24px;
+            color: var(--primary);
+        }
+        .card {
+            background: var(--card);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 15px;
+        }
+        label {
+            font-weight: bold;
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        input[type="text"], input[type="number"], textarea {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        button {
+            width: 100%;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        button:active {
+            background-color: #0369a1;
+        }
+        .result-bar {
+            background: #f1f5f9;
+            border-left: 5px solid var(--primary);
+            padding: 15px 10px;
+            margin-top: 10px;
+            border-radius: 4px;
+        }
+        .badge {
+            background: #e2e8f0;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: bold;
+        }
+        .badge-qty {
+            background: var(--primary);
+            color: white;
+            font-size: 14px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            display: inline-block;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Tall de Barres 1D</h1>
+
+    <div class="card">
+        <label for="stockSizes">Mides de barra en estoc (mm, separades per comes):</label>
+        <input type="text" id="stockSizes" value="6000, 4000, 3000">
+
+        <label for="kerf">Gruix del disc de tall / serra (mm):</label>
+        <input type="number" id="kerf" value="4" min="0">
+    </div>
+
+    <div class="card">
+        <label for="demandText">Llista de talls (Format: Quantitat de Longitud):</label>
+        <textarea id="demandText" rows="6" placeholder="Exemple:&#10;5 de 1200&#10;3 de 1500"></textarea>
+        
+        <button id="btnOptimize" onclick="optimizeCuts()">Optimitzar Flux de Tall</button>
+    </div>
+
+    <div class="card">
+        <h2>Resultat de l'Optimització</h2>
+        <div id="results">Els resultats apareixeran aquí.</div>
+    </div>
+</div>
+
+<script>
+    function optimizeCuts() {
+        const stockSizesInput = document.getElementById('stockSizes').value;
+        const kerf = parseFloat(document.getElementById('kerf').value) || 0;
+        const demandTextInput = document.getElementById('demandText').value;
+
+        // Processar mides d'estoc
+        const stockSizes = stockSizesInput.split(',')
+            .map(x => parseFloat(x.trim()))
+            .filter(x => !isNaN(x))
+            .sort((a, b) => a - b);
+
+        if (stockSizes.length === 0) {
+            alert("Introdueix almenys una mida de barra en estoc vàlida.");
+            return;
+        }
+
+        // Processar els talls sol·licitats
+        const demands = [];
+        const lines = demandTextInput.split('\n');
+        lines.forEach(line => {
+            const parts = line.toLowerCase().split('de');
+            if (parts.length === 2) {
+                const qty = parseInt(parts[0].trim());
+                const len = parseFloat(parts[1].trim());
+                if (!isNaN(qty) && !isNaN(len)) {
+                    for (let i = 0; i < qty; i++) {
+                        demands.push(len);
+                    }
+                }
+            }
+        });
+
+        if (demands.length === 0) {
+            alert("No s'han trobat talls vàlids al quadre de text. Revisa el format (Ex: 5 de 1200).");
+            return;
+        }
+
+        demands.sort((a, b) => b - a);
+        const usedBars = [];
+
+        // Algorisme principal
+        demands.forEach(cutLength => {
+            let placed = false;
+
+            for (let bar of usedBars) {
+                let requiredSpace = bar.cuts.length === 0 ? cutLength : cutLength + kerf;
+                if (bar.remainingSpace >= requiredSpace) {
+                    bar.cuts.push(cutLength);
+                    bar.remainingSpace -= requiredSpace;
+                    placed = true;
+                    break;
+                }
+            }
+
+            if (!placed) {
+                const suitableSize = stockSizes.find(size => size >= cutLength);
+
+                if (!suitableSize) {
+                    alert(`Error: El tall de ${cutLength}mm és superior a la barra més gran disponible en estoc.`);
+                    return;
+                }
+
+                usedBars.push({
+                    totalLength: suitableSize,
+                    remainingSpace: suitableSize - cutLength,
+                    cuts: [cutLength]
+                });
+            }
+        });
+
+        displayResults(usedBars, kerf);
+    }
+
+    function displayResults(bars, kerf) {
+        const resultsDiv = document.getElementById('results');
+        resultsDiv.innerHTML = "";
+
+        if (bars.length === 0) return;
+
+        const groupedBars = {};
+        
+        bars.forEach(bar => {
+            const sortedCuts = [...bar.cuts].sort((a, b) => b - a);
+            const patternKey = `${bar.totalLength}_${sortedCuts.join('-')}`;
+
+            if (!groupedBars[patternKey]) {
+                groupedBars[patternKey] = {
+                    count: 1,
+                    totalLength: bar.totalLength,
+                    cuts: sortedCuts,
+                    remainingSpace: bar.remainingSpace
+                };
+            } else {
+                groupedBars[patternKey].count++;
+            }
+        });
+
+        let html = `<p><strong>Total barres utilitzades:</strong> ${bars.length}</p>`;
+        
+        Object.values(groupedBars).forEach((group, index) => {
+            let cutsList = group.cuts.join('mm + ');
+            let waste = group.remainingSpace.toFixed(1);
+            
+            html += `
+                <div class="result-bar">
+                    <div class="badge-qty">${group.count} de Barra de ${group.totalLength}mm</div><br>
+                    <span class="badge">Patró de talls:</span> ${cutsList}mm <br>
+                    <span class="badge" style="background:#fee2e2; color:#991b1b; margin-top:5px; display:inline-block;">Residu per barra:</span> ${waste}mm (inclou kerf de ${kerf}mm)
+                </div>
+            `;
+        });
+
+        resultsDiv.innerHTML = html;
+    }
+</script>
+
+</body>
+</html>
