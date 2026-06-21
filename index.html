@@ -102,10 +102,10 @@
 </div>
 
     <div class="card">
-        <label for="stockSizes">Mides de barra en estoc (mm, separades per comes):</label>
-        <input type="text" id="stockSizes" value="6000, 4000, 3000">
+        <label for="stockSizes">Estoc disponible (Format: Quantitat de Longitud, o només Longitud per estoc infinit):</label>
+        <textarea id="stockSizes" rows="4" placeholder="Exemple:&#10;10 de 6000&#10;5 de 4000&#10;3000"></textarea>
 
-        <label for="kerf">Gruix del disc de tall / serra (mm):</label>
+        <label for="kerf" style="margin-top: 15px;">Gruix del disc de tall / serra (mm):</label>
         <input type="number" id="kerf" value="4" min="0">
     </div>
 
@@ -128,18 +128,40 @@
         const kerf = parseFloat(document.getElementById('kerf').value) || 0;
         const demandTextInput = document.getElementById('demandText').value;
 
-        // Processar mides d'estoc
-        const stockSizes = stockSizesInput.split(',')
-            .map(x => parseFloat(x.trim()))
-            .filter(x => !isNaN(x))
-            .sort((a, b) => a - b);
+        // 1. PROCESSAR L'ESTOC DISPONIBLE I CREAR L'INVENTARI
+        let inventory = {};
+        let stockSizes = [];
+
+        // Permetem separar per salts de línia o comes
+        const stockLines = stockSizesInput.split(/[\n,]/);
+        stockLines.forEach(line => {
+            const parts = line.toLowerCase().split('de');
+            if (parts.length === 2) {
+                // Cas: "10 de 6000"
+                const qty = parseInt(parts[0].trim());
+                const len = parseFloat(parts[1].trim());
+                if (!isNaN(qty) && !isNaN(len)) {
+                    inventory[len] = (inventory[len] || 0) + qty;
+                    if (!stockSizes.includes(len)) stockSizes.push(len);
+                }
+            } else if (parts.length === 1) {
+                // Cas: "6000" (Assumim estoc infinit)
+                const len = parseFloat(parts[0].trim());
+                if (!isNaN(len)) {
+                    inventory[len] = Infinity; 
+                    if (!stockSizes.includes(len)) stockSizes.push(len);
+                }
+            }
+        });
+
+        stockSizes.sort((a, b) => a - b);
 
         if (stockSizes.length === 0) {
             alert("Introdueix almenys una mida de barra en estoc vàlida.");
             return;
         }
 
-        // Processar els talls sol·licitats
+        // 2. PROCESSAR ELS TALLS SOL·LICITATS
         const demands = [];
         const lines = demandTextInput.split('\n');
         lines.forEach(line => {
@@ -163,10 +185,11 @@
         demands.sort((a, b) => b - a);
         const usedBars = [];
 
-        // Algorisme principal
-        demands.forEach(cutLength => {
+        // 3. ALGORISME PRINCIPAL AMB CONTROL D'INVENTARI
+        for (let cutLength of demands) {
             let placed = false;
 
+            // Primer intentem aprofitar les retalls de les barres que ja hem obert
             for (let bar of usedBars) {
                 let requiredSpace = bar.cuts.length === 0 ? cutLength : cutLength + kerf;
                 if (bar.remainingSpace >= requiredSpace) {
@@ -177,13 +200,18 @@
                 }
             }
 
+            // Si no cap a les barres obertes, n'obrim una de nova del nostre estoc
             if (!placed) {
-                const suitableSize = stockSizes.find(size => size >= cutLength);
+                // Busquem la barra més petita que ens serveixi i de la qual TINGUEM ESTOC (>0)
+                const suitableSize = stockSizes.find(size => size >= cutLength && inventory[size] > 0);
 
                 if (!suitableSize) {
-                    alert(`Error: El tall de ${cutLength}mm és superior a la barra més gran disponible en estoc.`);
-                    return;
+                    alert(`Error: T'has quedat sense estoc o no tens barres prou grans per encabir un tall de ${cutLength}mm.`);
+                    return; // S'atura el càlcul
                 }
+
+                // Descomptem 1 barra del nostre inventari virtual
+                inventory[suitableSize]--;
 
                 usedBars.push({
                     totalLength: suitableSize,
@@ -191,7 +219,7 @@
                     cuts: [cutLength]
                 });
             }
-        });
+        }
 
         displayResults(usedBars, kerf);
     }
