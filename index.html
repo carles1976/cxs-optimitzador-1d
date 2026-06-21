@@ -8,8 +8,6 @@
     <link rel="apple-touch-icon" href="icona_tall1d.png">
     <link rel="icon" href="icona_tall1d.png">
     
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    
     <style>
         :root {
             --primary: #0284c7;
@@ -23,6 +21,15 @@
             color: var(--text);
             margin: 0;
             padding: 15px;
+            position: relative; /* Necessari per col·locar la versió a dalt a la dreta */
+        }
+        .version {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            font-size: 10px;
+            color: #94a3b8;
+            font-family: monospace;
         }
         .container {
             max-width: 500px;
@@ -46,7 +53,7 @@
             margin-bottom: 5px;
             font-size: 14px;
         }
-        input[type="text"], input[type="number"], input[type="file"], textarea {
+        input[type="text"], input[type="number"], textarea {
             width: 100%;
             padding: 10px;
             margin-bottom: 10px;
@@ -67,22 +74,8 @@
             border-radius: 6px;
             cursor: pointer;
         }
-        button:disabled {
-            background-color: #94a3b8;
-            cursor: not-allowed;
-        }
         button:active {
             background-color: #0369a1;
-        }
-        .loading {
-            display: none;
-            color: #d97706;
-            font-weight: bold;
-            text-align: center;
-            margin-bottom: 15px;
-            padding: 10px;
-            background-color: #fef3c7;
-            border-radius: 6px;
         }
         .result-bar {
             background: #f1f5f9;
@@ -111,6 +104,8 @@
 </head>
 <body>
 
+<div class="version">v.202606211929</div>
+
 <div class="container">
 
 <div style="display: flex; align-items: flex-end; gap: 60px; margin-top: 10px; margin-bottom: 20px;">
@@ -127,12 +122,7 @@
     </div>
 
     <div class="card">
-        <label>1. Tria una foto o fes-ne una ara:</label>
-        <input type="file" id="photoInput" accept="image/*">
-        
-        <div id="loadingOCR" class="loading">Llegint la imatge... Pot trigar uns segons depenent d'internet.</div>
-
-        <label for="demandText" style="margin-top: 10px;">2. Llista de talls a fer:</label>
+        <label for="demandText">Llista de talls a fer (Format: Quantitat de Longitud):</label>
         <textarea id="demandText" rows="6" placeholder="Exemple:&#10;5 de 1200&#10;3 de 1500"></textarea>
         
         <button id="btnOptimize" onclick="optimizeCuts()">Optimitzar Flux de Tall</button>
@@ -145,102 +135,6 @@
 </div>
 
 <script>
-    document.getElementById('photoInput').addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        const loadingDiv = document.getElementById('loadingOCR');
-        const btn = document.getElementById('btnOptimize');
-        loadingDiv.style.display = 'block';
-        btn.disabled = true;
-
-        Tesseract.recognize(file, 'cat+spa')
-            .then(({ data: { text } }) => {
-                parseAndAppendOCR(text);
-            })
-            .catch(err => {
-                alert("Error tècnic en llegir la imatge: " + err.message);
-            })
-            .finally(() => {
-                loadingDiv.style.display = 'none';
-                btn.disabled = false;
-                document.getElementById('photoInput').value = ""; 
-            });
-    });
-
-    function parseAndAppendOCR(rawText) {
-        // NOU: Auto-corrector d'errors típics de l'OCR
-        // Substitueix lletres que l'IA confon per números
-        let cleanedText = rawText
-            .replace(/O/g, '0')
-            .replace(/o/g, '0')
-            .replace(/S/g, '5')
-            .replace(/s/g, '5')
-            .replace(/l/g, '1') // l minúscula
-            .replace(/I/g, '1') // I majúscula
-            .replace(/\|/g, '1') // barra vertical
-            .replace(/B/g, '8')
-            .replace(/Z/g, '2')
-            .replace(/z/g, '2');
-
-        const lines = cleanedText.split('\n');
-        let formattedText = "";
-
-        lines.forEach(line => {
-            // El patró ara treballa sobre el text netejat
-            const matches = line.match(/(\d+)[\s]*(?:x|X|\*|\-|–|,|de|DE|d|D|\.)[\s]*(\d+)/i);
-            if (matches) {
-                let val1 = parseInt(matches[1]);
-                let val2 = parseInt(matches[2]);
-                
-                let qty = val1 < val2 ? val1 : val2;
-                let len = val1 >= val2 ? val1 : val2;
-                
-                formattedText += `${qty} de ${len}\n`;
-            }
-        });
-
-        if(formattedText === "") {
-            alert("No s'han detectat mides a la foto.\n\nAixò és el que ha llegit el programa (potser hi ha errors):\n" + rawText + "\n\nIntenta escriure-ho a mà o fer la foto amb millor llum i lletra d'impremta.");
-        } else {
-            const currentText = document.getElementById('demandText').value;
-            if (currentText.trim() !== "") {
-                document.getElementById('demandText').value = currentText + "\n" + formattedText;
-            } else {
-                document.getElementById('demandText').value = formattedText;
-            }
-            alert("Talls llegits i afegits correctament!");
-        }
-    }
-
-        lines.forEach(line => {
-            // Un filtre més potent: busca dos números separats per qualsevol lletra o símbol
-            const matches = line.match(/(\d+)[\s]*(?:x|X|\*|\-|–|,|de|DE|d|D|\.)[\s]*(\d+)/i);
-            if (matches) {
-                let val1 = parseInt(matches[1]);
-                let val2 = parseInt(matches[2]);
-                
-                let qty = val1 < val2 ? val1 : val2;
-                let len = val1 >= val2 ? val1 : val2;
-                
-                formattedText += `${qty} de ${len}\n`;
-            }
-        });
-
-        if(formattedText === "") {
-            // Si falla, et mostra exactament el que ha llegit l'ordinador perquè sàpigues l'error
-            alert("No s'han detectat mides a la foto.\n\nAixò és el que ha llegit el programa:\n" + rawText + "\n\nIntenta escriure-ho a mà o fer la foto amb millor llum i lletra d'impremta.");
-        } else {
-            const currentText = document.getElementById('demandText').value;
-            if (currentText.trim() !== "") {
-                document.getElementById('demandText').value = currentText + "\n" + formattedText;
-            } else {
-                document.getElementById('demandText').value = formattedText;
-            }
-            alert("Talls llegits i afegits correctament!");
-        }
-    }
-
     function optimizeCuts() {
         const stockSizesInput = document.getElementById('stockSizes').value;
         const kerf = parseFloat(document.getElementById('kerf').value) || 0;
