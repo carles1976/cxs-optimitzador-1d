@@ -127,12 +127,12 @@
     </div>
 
     <div class="card">
-        <label>1. Fes una foto o puja la llista de talls:</label>
-        <input type="file" id="photoInput" accept="image/*" capture="environment">
+        <label>1. Tria una foto o fes-ne una ara:</label>
+        <input type="file" id="photoInput" accept="image/*">
         
-        <div id="loadingOCR" class="loading">Llegint la imatge amb Intel·ligència Artificial... Això pot trigar uns segons.</div>
+        <div id="loadingOCR" class="loading">Llegint la imatge... Pot trigar uns segons depenent d'internet.</div>
 
-        <label for="demandText" style="margin-top: 10px;">2. Llista de talls a fer (es pot escriure a mà o des de la foto):</label>
+        <label for="demandText" style="margin-top: 10px;">2. Llista de talls a fer:</label>
         <textarea id="demandText" rows="6" placeholder="Exemple:&#10;5 de 1200&#10;3 de 1500"></textarea>
         
         <button id="btnOptimize" onclick="optimizeCuts()">Optimitzar Flux de Tall</button>
@@ -145,7 +145,6 @@
 </div>
 
 <script>
-    // --- LÒGICA DE RECONEIXEMENT D'IMATGE (OCR) ---
     document.getElementById('photoInput').addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (!file) return;
@@ -155,18 +154,16 @@
         loadingDiv.style.display = 'block';
         btn.disabled = true;
 
-        // Executem Tesseract per extreure el text
         Tesseract.recognize(file, 'cat+spa')
             .then(({ data: { text } }) => {
                 parseAndAppendOCR(text);
             })
             .catch(err => {
-                alert("Error en llegir la imatge: " + err.message);
+                alert("Error tècnic en llegir la imatge: " + err.message);
             })
             .finally(() => {
                 loadingDiv.style.display = 'none';
                 btn.disabled = false;
-                // Neteja l'input per si es vol fer una altra foto
                 document.getElementById('photoInput').value = ""; 
             });
     });
@@ -176,13 +173,12 @@
         let formattedText = "";
 
         lines.forEach(line => {
-            // Busca patrons numèrics amb "de", "x", "-", etc.
-            const matches = line.match(/(\d+)[\s]*(?:x|X|\-|–|,|de|DE)[\s]*(\d+)/i);
+            // Un filtre més potent: busca dos números separats per qualsevol lletra o símbol
+            const matches = line.match(/(\d+)[\s]*(?:x|X|\*|\-|–|,|de|DE|d|D|\.)[\s]*(\d+)/i);
             if (matches) {
                 let val1 = parseInt(matches[1]);
                 let val2 = parseInt(matches[2]);
                 
-                // Assumim que el número gran és la longitud i el petit la quantitat
                 let qty = val1 < val2 ? val1 : val2;
                 let len = val1 >= val2 ? val1 : val2;
                 
@@ -191,19 +187,19 @@
         });
 
         if(formattedText === "") {
-            alert("No s'han detectat mides clares a la foto. Prova de fer-la més a prop i amb bona llum.");
+            // Si falla, et mostra exactament el que ha llegit l'ordinador perquè sàpigues l'error
+            alert("No s'han detectat mides a la foto.\n\nAixò és el que ha llegit el programa:\n" + rawText + "\n\nIntenta escriure-ho a mà o fer la foto amb millor llum i lletra d'impremta.");
         } else {
-            // Afegeix el text llegit al quadre de text sense esborrar el que hi havia
             const currentText = document.getElementById('demandText').value;
             if (currentText.trim() !== "") {
                 document.getElementById('demandText').value = currentText + "\n" + formattedText;
             } else {
                 document.getElementById('demandText').value = formattedText;
             }
+            alert("Talls llegits i afegits correctament!");
         }
     }
 
-    // --- LÒGICA D'OPTIMITZACIÓ I INVENTARI ---
     function optimizeCuts() {
         const stockSizesInput = document.getElementById('stockSizes').value;
         const kerf = parseFloat(document.getElementById('kerf').value) || 0;
@@ -259,3 +255,84 @@
         }
 
         demands.sort((a, b) => b - a);
+        const usedBars = [];
+
+        for (let cutLength of demands) {
+            let placed = false;
+
+            for (let bar of usedBars) {
+                let requiredSpace = bar.cuts.length === 0 ? cutLength : cutLength + kerf;
+                if (bar.remainingSpace >= requiredSpace) {
+                    bar.cuts.push(cutLength);
+                    bar.remainingSpace -= requiredSpace;
+                    placed = true;
+                    break;
+                }
+            }
+
+            if (!placed) {
+                const suitableSize = stockSizes.find(size => size >= cutLength && inventory[size] > 0);
+
+                if (!suitableSize) {
+                    alert(`Error: T'has quedat sense estoc o no tens barres prou grans per encabir un tall de ${cutLength}mm.`);
+                    return; 
+                }
+
+                inventory[suitableSize]--;
+
+                usedBars.push({
+                    totalLength: suitableSize,
+                    remainingSpace: suitableSize - cutLength,
+                    cuts: [cutLength]
+                });
+            }
+        }
+
+        displayResults(usedBars, kerf);
+    }
+
+    function displayResults(bars, kerf) {
+        const resultsDiv = document.getElementById('results');
+        resultsDiv.innerHTML = "";
+
+        if (bars.length === 0) return;
+
+        const groupedBars = {};
+        
+        bars.forEach(bar => {
+            const sortedCuts = [...bar.cuts].sort((a, b) => b - a);
+            const patternKey = `${bar.totalLength}_${sortedCuts.join('-')}`;
+
+            if (!groupedBars[patternKey]) {
+                groupedBars[patternKey] = {
+                    count: 1,
+                    totalLength: bar.totalLength,
+                    cuts: sortedCuts,
+                    remainingSpace: bar.remainingSpace
+                };
+            } else {
+                groupedBars[patternKey].count++;
+            }
+        });
+
+        let html = `<p><strong>Total barres utilitzades:</strong> ${bars.length}</p>`;
+        
+        Object.values(groupedBars).forEach((group, index) => {
+            let cutsList = group.cuts.join('mm + ');
+            let waste = group.remainingSpace.toFixed(1);
+            
+            html += `
+                <div class="result-bar">
+                    <div class="badge-qty">${group.count} de Barra de ${group.totalLength}mm</div><br>
+                    <span class="badge">Patró de talls:</span> ${cutsList}mm <br>
+                    <span class="badge" style="background:#fee2e2; color:#991b1b; margin-top:5px; display:inline-block;">Residu per barra:</span> ${waste}mm (inclou kerf de ${kerf}mm)
+                </div>
+            `;
+        });
+
+        resultsDiv.innerHTML = html;
+    }
+</script>
+
+</body>
+</html>
