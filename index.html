@@ -169,8 +169,49 @@
     });
 
     function parseAndAppendOCR(rawText) {
-        const lines = rawText.split('\n');
+        // NOU: Auto-corrector d'errors típics de l'OCR
+        // Substitueix lletres que l'IA confon per números
+        let cleanedText = rawText
+            .replace(/O/g, '0')
+            .replace(/o/g, '0')
+            .replace(/S/g, '5')
+            .replace(/s/g, '5')
+            .replace(/l/g, '1') // l minúscula
+            .replace(/I/g, '1') // I majúscula
+            .replace(/\|/g, '1') // barra vertical
+            .replace(/B/g, '8')
+            .replace(/Z/g, '2')
+            .replace(/z/g, '2');
+
+        const lines = cleanedText.split('\n');
         let formattedText = "";
+
+        lines.forEach(line => {
+            // El patró ara treballa sobre el text netejat
+            const matches = line.match(/(\d+)[\s]*(?:x|X|\*|\-|–|,|de|DE|d|D|\.)[\s]*(\d+)/i);
+            if (matches) {
+                let val1 = parseInt(matches[1]);
+                let val2 = parseInt(matches[2]);
+                
+                let qty = val1 < val2 ? val1 : val2;
+                let len = val1 >= val2 ? val1 : val2;
+                
+                formattedText += `${qty} de ${len}\n`;
+            }
+        });
+
+        if(formattedText === "") {
+            alert("No s'han detectat mides a la foto.\n\nAixò és el que ha llegit el programa (potser hi ha errors):\n" + rawText + "\n\nIntenta escriure-ho a mà o fer la foto amb millor llum i lletra d'impremta.");
+        } else {
+            const currentText = document.getElementById('demandText').value;
+            if (currentText.trim() !== "") {
+                document.getElementById('demandText').value = currentText + "\n" + formattedText;
+            } else {
+                document.getElementById('demandText').value = formattedText;
+            }
+            alert("Talls llegits i afegits correctament!");
+        }
+    }
 
         lines.forEach(line => {
             // Un filtre més potent: busca dos números separats per qualsevol lletra o símbol
