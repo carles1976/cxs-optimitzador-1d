@@ -21,7 +21,7 @@
             color: var(--text);
             margin: 0;
             padding: 15px;
-            position: relative; /* Necessari per col·locar la versió a dalt a la dreta */
+            position: relative;
         }
         .version {
             position: absolute;
@@ -53,7 +53,7 @@
             margin-bottom: 5px;
             font-size: 14px;
         }
-        input[type="text"], input[type="number"], textarea {
+        input[type="text"], input[type="number"], select, textarea {
             width: 100%;
             padding: 10px;
             margin-bottom: 10px;
@@ -104,7 +104,7 @@
 </head>
 <body>
 
-<div class="version">v.202606211929</div>
+<div class="version">v.202606211935</div>
 
 <div class="container">
 
@@ -114,16 +114,22 @@
 </div>
 
     <div class="card">
-        <label for="stockSizes">Estoc disponible (Format: Quantitat de Longitud, o només Longitud per estoc infinit):</label>
-        <textarea id="stockSizes" rows="4" placeholder="Exemple:&#10;10 de 6000&#10;5 de 4000&#10;3000"></textarea>
+        <label for="unitSelect">Unitat de mesura:</label>
+        <select id="unitSelect">
+            <option value="cm" selected>Centímetres (cm)</option>
+            <option value="mm">Mil·límetres (mm)</option>
+        </select>
 
-        <label for="kerf" style="margin-top: 15px;">Gruix del disc de tall / serra (mm):</label>
-        <input type="number" id="kerf" value="4" min="0">
+        <label for="stockSizes" style="margin-top: 15px;">Estoc disponible (Format: Quantitat de Longitud, o només Longitud):</label>
+        <textarea id="stockSizes" rows="4" placeholder="Exemple:&#10;10 de 600&#10;5 de 400&#10;300"></textarea>
+
+        <label for="kerf" style="margin-top: 15px;">Gruix del disc de tall / serra:</label>
+        <input type="number" id="kerf" value="0.4" min="0" step="0.1">
     </div>
 
     <div class="card">
         <label for="demandText">Llista de talls a fer (Format: Quantitat de Longitud):</label>
-        <textarea id="demandText" rows="6" placeholder="Exemple:&#10;5 de 1200&#10;3 de 1500"></textarea>
+        <textarea id="demandText" rows="6" placeholder="Exemple:&#10;5 de 120&#10;3 de 150.5"></textarea>
         
         <button id="btnOptimize" onclick="optimizeCuts()">Optimitzar Flux de Tall</button>
     </div>
@@ -139,6 +145,7 @@
         const stockSizesInput = document.getElementById('stockSizes').value;
         const kerf = parseFloat(document.getElementById('kerf').value) || 0;
         const demandTextInput = document.getElementById('demandText').value;
+        const unit = document.getElementById('unitSelect').value;
 
         let inventory = {};
         let stockSizes = [];
@@ -172,102 +179,4 @@
         const demands = [];
         const lines = demandTextInput.split('\n');
         lines.forEach(line => {
-            const parts = line.toLowerCase().split('de');
-            if (parts.length === 2) {
-                const qty = parseInt(parts[0].trim());
-                const len = parseFloat(parts[1].trim());
-                if (!isNaN(qty) && !isNaN(len)) {
-                    for (let i = 0; i < qty; i++) {
-                        demands.push(len);
-                    }
-                }
-            }
-        });
-
-        if (demands.length === 0) {
-            alert("No s'han trobat talls vàlids al quadre de text. Revisa el format (Ex: 5 de 1200).");
-            return;
-        }
-
-        demands.sort((a, b) => b - a);
-        const usedBars = [];
-
-        for (let cutLength of demands) {
-            let placed = false;
-
-            for (let bar of usedBars) {
-                let requiredSpace = bar.cuts.length === 0 ? cutLength : cutLength + kerf;
-                if (bar.remainingSpace >= requiredSpace) {
-                    bar.cuts.push(cutLength);
-                    bar.remainingSpace -= requiredSpace;
-                    placed = true;
-                    break;
-                }
-            }
-
-            if (!placed) {
-                const suitableSize = stockSizes.find(size => size >= cutLength && inventory[size] > 0);
-
-                if (!suitableSize) {
-                    alert(`Error: T'has quedat sense estoc o no tens barres prou grans per encabir un tall de ${cutLength}mm.`);
-                    return; 
-                }
-
-                inventory[suitableSize]--;
-
-                usedBars.push({
-                    totalLength: suitableSize,
-                    remainingSpace: suitableSize - cutLength,
-                    cuts: [cutLength]
-                });
-            }
-        }
-
-        displayResults(usedBars, kerf);
-    }
-
-    function displayResults(bars, kerf) {
-        const resultsDiv = document.getElementById('results');
-        resultsDiv.innerHTML = "";
-
-        if (bars.length === 0) return;
-
-        const groupedBars = {};
-        
-        bars.forEach(bar => {
-            const sortedCuts = [...bar.cuts].sort((a, b) => b - a);
-            const patternKey = `${bar.totalLength}_${sortedCuts.join('-')}`;
-
-            if (!groupedBars[patternKey]) {
-                groupedBars[patternKey] = {
-                    count: 1,
-                    totalLength: bar.totalLength,
-                    cuts: sortedCuts,
-                    remainingSpace: bar.remainingSpace
-                };
-            } else {
-                groupedBars[patternKey].count++;
-            }
-        });
-
-        let html = `<p><strong>Total barres utilitzades:</strong> ${bars.length}</p>`;
-        
-        Object.values(groupedBars).forEach((group, index) => {
-            let cutsList = group.cuts.join('mm + ');
-            let waste = group.remainingSpace.toFixed(1);
-            
-            html += `
-                <div class="result-bar">
-                    <div class="badge-qty">${group.count} de Barra de ${group.totalLength}mm</div><br>
-                    <span class="badge">Patró de talls:</span> ${cutsList}mm <br>
-                    <span class="badge" style="background:#fee2e2; color:#991b1b; margin-top:5px; display:inline-block;">Residu per barra:</span> ${waste}mm (inclou kerf de ${kerf}mm)
-                </div>
-            `;
-        });
-
-        resultsDiv.innerHTML = html;
-    }
-</script>
-
-</body>
-</html>
+            const parts = line.toLowerCase().split('de
