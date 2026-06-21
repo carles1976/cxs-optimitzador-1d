@@ -104,7 +104,7 @@
 </head>
 <body>
 
-<div class="version">v.202606211935</div>
+<div class="version">v.202606211940</div>
 
 <div class="container">
 
@@ -128,8 +128,8 @@
     </div>
 
     <div class="card">
-        <label for="demandText">Llista de talls a fer (Format: Quantitat de Longitud):</label>
-        <textarea id="demandText" rows="6" placeholder="Exemple:&#10;5 de 120&#10;3 de 150.5"></textarea>
+        <label for="demandText">Llista de talls a fer (Exemples vàlids: 5 de 120,5 | 5x120 | 5 - 120):</label>
+        <textarea id="demandText" rows="6" placeholder="Exemple:&#10;5 de 120,5&#10;3 x 150"></textarea>
         
         <button id="btnOptimize" onclick="optimizeCuts()">Optimitzar Flux de Tall</button>
     </div>
@@ -141,42 +141,152 @@
 </div>
 
 <script>
+    // Nou extractor intel·ligent que llegeix comes com a decimals
+    function extractData(line) {
+        let cleanLine = line.toLowerCase().replace(/,/g, '.').trim();
+        if (!cleanLine) return null;
+        
+        // Cerca patrons com "5 de 120", "5x120.5", "5 - 120"
+        const match = cleanLine.match(/^(\d+)\s*(?:de|x|\-|\*)\s*(\d+(?:\.\d+)?)$/);
+        if (match) {
+            return { qty: parseInt(match[1]), len: parseFloat(match[2]) };
+        }
+        
+        // Cerca si només és un número lliure (per a l'estoc infinit)
+        const singleMatch = cleanLine.match(/^(\d+(?:\.\d+)?)$/);
+        if (singleMatch) {
+            return { qty: Infinity, len: parseFloat(singleMatch[1]) };
+        }
+        
+        return null;
+    }
+
     function optimizeCuts() {
         const stockSizesInput = document.getElementById('stockSizes').value;
-        const kerf = parseFloat(document.getElementById('kerf').value) || 0;
+        const kerfStr = document.getElementById('kerf').value.replace(/,/g, '.');
+        const kerf = parseFloat(kerfStr) || 0;
         const demandTextInput = document.getElementById('demandText').value;
         const unit = document.getElementById('unitSelect').value;
 
         let inventory = {};
         let stockSizes = [];
 
-        const stockLines = stockSizesInput.split(/[\n,]/);
+        const stockLines = stockSizesInput.split('\n');
         stockLines.forEach(line => {
-            const parts = line.toLowerCase().split('de');
-            if (parts.length === 2) {
-                const qty = parseInt(parts[0].trim());
-                const len = parseFloat(parts[1].trim());
-                if (!isNaN(qty) && !isNaN(len)) {
-                    inventory[len] = (inventory[len] || 0) + qty;
-                    if (!stockSizes.includes(len)) stockSizes.push(len);
-                }
-            } else if (parts.length === 1) {
-                const len = parseFloat(parts[0].trim());
-                if (!isNaN(len)) {
-                    inventory[len] = Infinity; 
-                    if (!stockSizes.includes(len)) stockSizes.push(len);
-                }
+            const data = extractData(line);
+            if (data) {
+                inventory[data.len] = (inventory[data.len] || 0) + data.qty;
+                if (!stockSizes.includes(data.len)) stockSizes.push(data.len);
             }
         });
 
         stockSizes.sort((a, b) => a - b);
 
         if (stockSizes.length === 0) {
-            alert("Introdueix almenys una mida de barra en estoc vàlida.");
+            alert("Introdueix almenys una mida de barra en estoc vàlida (només números).");
             return;
         }
 
         const demands = [];
         const lines = demandTextInput.split('\n');
         lines.forEach(line => {
-            const parts = line.toLowerCase().split('de
+            const data = extractData(line);
+            if (data && data.qty !== Infinity) {
+                for (let i = 0; i < data.qty; i++) {
+                    demands.push(data.len);
+                }
+            }
+        });
+
+        if (demands.length === 0) {
+            alert("No s'han trobat talls vàlids. Revisa el format, ex: 5 de 120,5");
+            return;
+        }
+
+        demands.sort((a, b) => b - a);
+        const usedBars = [];
+
+        for (let cutLength of demands) {
+            let placed = false;
+
+            for (let bar of usedBars) {
+                let requiredSpace = bar.cuts.length === 0 ? cutLength : cutLength + kerf;
+                // La màgia per evitar l'error de precisió dels decimals de JavaScript (+ 0.001)
+                if (bar.remainingSpace + 0.001 >= requiredSpace) {
+                    bar.cuts.push(cutLength);
+                    bar.remainingSpace -= requiredSpace;
+                    placed = true;
+                    break;
+                }
+            }
+
+            if (!placed) {
+                const suitableSize = stockSizes.find(size => size + 0.001 >= cutLength && inventory[size] > 0);
+
+                if (!suitableSize) {
+                    alert(`Error: T'has quedat sense estoc o no tens barres prou grans per encabir un tall de ${cutLength}${unit}.`);
+                    return; 
+                }
+
+                inventory[suitableSize]--;
+
+                usedBars.push({
+                    totalLength: suitableSize,
+                    remainingSpace: suitableSize - cutLength,
+                    cuts: [cutLength]
+                });
+            }
+        }
+
+        displayResults(usedBars, kerf, unit);
+    }
+
+    function displayResults(bars, kerf, unit) {
+        const resultsDiv = document.getElementById('results');
+        resultsDiv.innerHTML = "";
+
+        if (bars.length === 0) return;
+
+        const groupedBars = {};
+        
+        bars.forEach(bar => {
+            const sortedCuts = [...bar.cuts].sort((a, b) => b - a);
+            const patternKey = `${bar.totalLength}_${sortedCuts.join('-')}`;
+
+            if (!groupedBars[patternKey]) {
+                groupedBars[patternKey] = {
+                    count: 1,
+                    totalLength: bar.totalLength,
+                    cuts: sortedCuts,
+                    remainingSpace: bar.remainingSpace
+                };
+            } else {
+                groupedBars[patternKey].count++;
+            }
+        });
+
+        let html = `<p><strong>Total barres utilitzades:</strong> ${bars.length}</p>`;
+        
+        Object.values(groupedBars).forEach((group, index) => {
+            let cutsFormatted = group.cuts.map(c => unit === 'cm' ? c.toFixed(1).replace('.', ',') : c);
+            let cutsList = cutsFormatted.join(`${unit} + `);
+            
+            let waste = unit === 'cm' ? group.remainingSpace.toFixed(1).replace('.', ',') : group.remainingSpace.toFixed(0);
+            let totalL = unit === 'cm' ? group.totalLength.toFixed(1).replace('.', ',') : group.totalLength;
+            let kerfFormat = unit === 'cm' ? kerf.toFixed(1).replace('.', ',') : kerf;
+            
+            html += `
+                <div class="result-bar">
+                    <div class="badge-qty">${group.count} de Barra de ${totalL}${unit}</div><br>
+                    <span class="badge">Patró de talls:</span> ${cutsList}${unit} <br>
+                    <span class="badge" style="background:#fee2e2; color:#991b1b; margin-top:5px; display:inline-block;">Residu per barra:</span> ${waste}${unit} (inclou kerf de ${kerfFormat}${unit})
+                </div>
+            `;
+        });
+
+        resultsDiv.innerHTML = html;
+    }
+</script>
+
+</body>
+</html>
